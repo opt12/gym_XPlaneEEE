@@ -1,0 +1,2 @@
+from gym_XPlaneEEE.envs.XplaneEEESpeed_env import XplaneEEESpeedEnv
+from gym_XPlaneEEE.envs.XplaneEEEGlideAngle_env import XplaneEEEGlideAngleEnv
