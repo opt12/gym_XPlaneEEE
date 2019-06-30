@@ -1,27 +1,51 @@
+#!/usr/bin/env python3
 from gym_XPlaneEEE.envs import XplaneEEEGlideAngleEnv
+from gym_XPlaneEEE.wrappers import wrappers
 import gym
+import time
+import argparse
+import numpy as np
 
-from time import sleep
+DEFAULT_ENV_NAME = "XPlaneEEEGlideAngle-v0"
+STEPS_PER_SECOND = 5    #TODO set this to 10 again
 
 if __name__ == "__main__":
-    env = gym.make("XPlaneEEEGlideAngle-v0")
-    
+    parser = argparse.ArgumentParser()
+    # parser.add_argument("-m", "--model", required=True, help="Model file to load")
+    parser.add_argument("-e", "--env", default=DEFAULT_ENV_NAME,
+                        help="Environment name to use, default=" + DEFAULT_ENV_NAME)
+    # parser.add_argument("-r", "--record", help="Directory to store video recording")
+    # parser.add_argument("--no-visualize", default=True, action='store_false', dest='visualize',
+    #                     help="Disable visualization of the game play")
+    args = parser.parse_args()
+
+    env = gym.make(args.env)
+    env = wrappers.TimeLimit(env, max_episode_seconds=15)
+    env = wrappers.EndOfBadEpisodes(env, -30, 50, suicide_penalty = -100)
+    env = wrappers.TimedActions(env, STEPS_PER_SECOND)
+
     total_reward = 0.0
     total_steps = 0
+    episode_number = 0
     obs = env.reset()
     episode_over = False
-    #perform 100 random steps
-    # for x in range(100):
-    while total_steps< 1:
-        sleep(0.100)
-        total_steps +=1
+
+    #perform some episodes with a random agent
+    while episode_number< 10:
         action = env.action_space.sample()
         obs, reward, episode_over, info = env.step(action)
-        env.render()
+        total_steps +=1
+        total_reward += reward
+        # env.render()
         # print(f'{total_steps}: Action: {action} yields:  obs: {obs}, reward: {reward}')
         if episode_over:
-            print(f'Episode over after {total_steps} steps.')
-            break
+            print(f'Episode {episode_number} over after {total_steps} steps with total reward = {total_reward}.')
+            total_reward = 0.0
+            total_steps = 0
+            episode_number += 1
+            obs = env.reset()
+            episode_over = False
+            continue
     print(f'Over and Out')
 
 

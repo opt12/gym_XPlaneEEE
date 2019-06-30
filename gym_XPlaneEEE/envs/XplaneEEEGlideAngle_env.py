@@ -15,6 +15,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 MAX_EPISODE_LENGTH = 90    #end the episode after 90 seconds
+MAX_ALLOWED_DEVIATION = 10 #end the episode when the glide angle is further away then 10° from the setpoint
 SOCKET_NAME = "/tmp/eee_AutoViewer"
 DESIRED_GLIDE_ANGLE = -6  #just a first guess
 PUNISHMENT_STALL = -1   #TODO compare with the speed punishment and scale accordingly
@@ -32,9 +33,10 @@ class XplaneEEEGlideAngleEnv(gym.Env):
         self.ipcClient = None
         self.curr_episode = 0
         self.reward = -10
+        self.targetGlideAngle = DESIRED_GLIDE_ANGLE
         # Define action and observation space
         #- yoke_pitch_ratio
-        self.action_space = spaces.Box(low=np.array([-1.0]), high=np.array([1.0]))
+        self.action_space = spaces.Box(-1, 1, shape = (1,), dtype=np.float32)
 
         #- glide Angle           #the descent angle to be controlled glide Angle = to_degrees(atan(Vh_ind/tas)
         #- stallWarning          #The stall warning signal
@@ -46,8 +48,8 @@ class XplaneEEEGlideAngleEnv(gym.Env):
         #- yoke_pitch_ratio      #The deflection of the joystick axis controlling pitch.
         #- true_phi              #roll
         #- yoke_roll_ratio       #The deflection of the joystick axis controlling roll.
-        self.observation_space = spaces.Box(low=np.array([-15.0, 0.0,   0.0, -60.0,     0.0, -10.0, -30.0, -1.0, -90.0, -1.0]), 
-                                           high=np.array([ 15.0, 1.0, 120.0, +60.0, 15000.0, +10.0, +30.0, +1.0, +90.0, +1.0]), dtype=np.float32)
+        self.observation_space = spaces.Box(low=np.array([-25.0, 0.0,   0.0, -60.0,     0.0, -10.0, -30.0, -1.0, -90.0, -1.0]), 
+                                           high=np.array([ 25.0, 1.0, 120.0, +60.0, 15000.0, +10.0, +30.0, +1.0, +90.0, +1.0]), dtype=np.float32)
         try: 
             self._establish_connection()
         except Exception as inst:
@@ -96,7 +98,7 @@ class XplaneEEEGlideAngleEnv(gym.Env):
                  use this for learning.
         """
         self._take_action(action)
-        self.glideAngleObservation = self.dc.getGlideAngleObservation()
+        self.glideAngleObservation = self.dc.getGlideAngleObservation() #TODO the observation list should go here
         self.reward = self._get_reward()
         episode_over = self._check_end_episode()    #TODO
         return self.glideAngleObservation, self.reward, episode_over, {}
@@ -113,18 +115,24 @@ class XplaneEEEGlideAngleEnv(gym.Env):
         """
         Checks the end of an episode.
         An Episode is over when either
-          - 300 seconds passed since the start of the episode
-          - the deviation from the desired speed is too high
+          - MAX_EPISODE_LENGTH seconds passed since the start of the episode
+          - the deviation from the desired Angle is too high
           - the plane is in some weird flight conditions
         Returns
         -------
         true: when the episode is over
         false: when the episde continues
         """
-        if (datetime.datetime.now() - self.startOfEpisode).seconds >= MAX_EPISODE_LENGTH:
-            return True
-
-        return False    #TODO check for weird flight conditions
+        return False    # the TimeLimit is done using the TimeLimit-Wrapper
+        # if (datetime.datetime.now() - self.startOfEpisode).seconds >= MAX_EPISODE_LENGTH:
+        #     print(f'{MAX_EPISODE_LENGTH} seconds over. Starting new episode.')
+        #     return True
+        # deviation = abs(self.glideAngleObservation[0] - self.targetGlideAngle)
+        # if  deviation >= MAX_ALLOWED_DEVIATION: #TODO Das ist Mist, dass ich hier wissen muss, dass [0] der GLide angle ist. 
+        #     print(f'Deviation too high: {deviation}')
+        #     #TODO stelle das um auf ein Kriterium, das mit dem self.reward arbeitet
+        #     return True
+        # return False    #TODO check for weird flight conditions
 
     def reset(self):
         """
@@ -136,16 +144,17 @@ class XplaneEEEGlideAngleEnv(gym.Env):
         self.curr_step = -1
         self.curr_episode += 1
         self.startOfEpisode = datetime.datetime.now()
+        waitingSteps = 10
         # calculate new initial plane state
         newPlaneState = prepareInitialPlaneState()
         # set initial plane state
         if self.ipcClient.socketSendData("SET_PLANE_STATE", 1, newPlaneState['data']):
             #get the first observation after changing the plane's state
-            print("Waiting for first two observations after RESET")
-            if not self.dc.awaitNextObservation():  #block until a new observation is sent from XPlane
-                return None #timeout ocurred
-            if not self.dc.awaitNextObservation():  #Do this twice to be sure, there is no in between state captured
-                return None #timeout ocurred
+            print("Waiting for first {} observations after RESET".format(waitingSteps))
+            for i in range(waitingSteps):
+                if not self.dc.awaitNextObservation():  #block until a new observation is sent from XPlane
+                    raise ConnectionError("Didn't receive any new Observations within one second. Check Connection to XPlane!")
+                    return None #timeout ocurred
             return self.dc.getGlideAngleObservation()
         else:
             return None
@@ -154,18 +163,19 @@ class XplaneEEEGlideAngleEnv(gym.Env):
         """ This function is currently useless as the rendering is 
             done externally. 
         """
-        print(f'current Angle: {self.glideAngleObservation[0]}; target Angle: {DESIRED_GLIDE_ANGLE}; reward: {self.reward};')
+        print(f'current Angle: {self.glideAngleObservation[0]}; target Angle: {self.targetGlideAngle}; reward: {self.reward};')
     
     def _seed(self):
         pass
 
     def _calculate_glide_angle_deviation(self, angle):
         """
-        calculates the mean square deviation of the current state from the desired speed
+        calculates absolute value deviation of the current state from the desired glide angle
         """
+        self.targetGlideAngle = self.dc.getObservation([['targetValues','requestedClimbRate']])
         #angles are usually small, so no normalization
-        mse = (angle - DESIRED_GLIDE_ANGLE)**2
-        return mse
+        dev = abs(angle - self.targetGlideAngle)
+        return dev
     
     def _caclulate_actuation_smoothness(self):
         #TODO calculate the smoothness over the last n elevator actions and weigh them with a suitable factor
@@ -177,12 +187,11 @@ class XplaneEEEGlideAngleEnv(gym.Env):
         The maximum reward to be earned is 0. Quadratic deviation from the desired angle is given
         as negative reward.
         Additional punishment is given 
-          - when the stall warning is active.
+          #TODO - when the stall warning is active.
           #TODO - for the smoothness of the actuation
         """
-        #calculate deviation from the desired angle. Desired angle is normalized to 1.
         reward = -self._calculate_glide_angle_deviation(self.glideAngleObservation[0])  #TODO this calculation and the factor are still somewhat arbitrary
-        if self.glideAngleObservation[1] != 0:
-            reward += PUNISHMENT_STALL
-        reward += self._caclulate_actuation_smoothness()
+        # if self.glideAngleObservation[1] != 0:
+        #     reward += PUNISHMENT_STALL
+        # reward += self._caclulate_actuation_smoothness()
         return reward
