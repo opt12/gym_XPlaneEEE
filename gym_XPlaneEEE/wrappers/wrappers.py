@@ -4,6 +4,8 @@ import gym
 import gym.spaces
 import numpy as np
 import collections
+import numpy as np
+
 
 class _MeanBuffer:   #bluntly stolen from Lapan p. 260
     def __init__(self, capacity):
@@ -31,7 +33,7 @@ class BufferWrapper(gym.ObservationWrapper):
     Replaces the single observation coming directly from the environment by a stack of
     the last n_steps observations.
 
-    This wrapper can be used to present soe dynamics over the last steps to the agent.
+    This wrapper can be used to present some dynamics over the last steps to the agent.
 
     TODO: Check the datatypes. I'm not quite sure whether all the matix and tensor shapes are really correct.
     """
@@ -39,17 +41,37 @@ class BufferWrapper(gym.ObservationWrapper):
         super(BufferWrapper, self).__init__(env)
         self.dtype = dtype
         old_space = env.observation_space
-        self.observation_space = gym.spaces.Box(old_space.low.repeat(n_steps, axis=0),
-                                                old_space.high.repeat(n_steps, axis=0), dtype=dtype)
+        self.observation_space = gym.spaces.Box(np.tile(old_space.low, n_steps),
+                                                np.tile(old_space.high, n_steps), dtype=dtype)
+        self.buffer = collections.deque(maxlen = len(self.observation_space.low))
 
     def reset(self):
-        self.buffer = np.zeros_like(self.observation_space.low, dtype=self.dtype)
-        return self.observation(self.env.reset())
+        self.buffer.extend(np.zeros_like(self.observation_space.low, dtype=self.dtype))
+        self.buffer.extend(self.observation(self.env.reset()))
+        return list(self.buffer)
 
     def observation(self, observation):
-        self.buffer[:-1] = self.buffer[1:]
-        self.buffer[-1] = observation
-        return self.buffer
+        self.buffer.extend(observation)
+        return list(self.buffer)
+
+class ObservationScaler(gym.ObservationWrapper):
+    """
+    Scales the observation values from their full ranges to the interval [-1, 1]
+
+    Hopefully this makes the learning a bit better
+
+    """
+    def __init__(self, env, dtype=np.float32):
+        super(ObservationScaler, self).__init__(env)
+        self.dtype = dtype
+        old_space = env.observation_space
+        self.rangeMean = (old_space.high + old_space.low)/2
+        self.scaleFactor = 2/(old_space.high - old_space.low)
+        self.observation_space = gym.spaces.Box((old_space.low- self.rangeMean)*self.scaleFactor,
+                                                (old_space.high - self.rangeMean)*self.scaleFactor, dtype=dtype)
+
+    def observation(self, observation):
+        return (observation - self.rangeMean)*self.scaleFactor
 
 import time
 class TimeLimit(gym.Wrapper):
@@ -117,7 +139,7 @@ class EndOfBadEpisodes(gym.Wrapper):
     :param suicide_penalty = -100: The additional penalty for a premature end of Episode. 
     Make this negative enough to prevent the agent from learning suicide.
     """
-    def __init__(self, env, worst_reward_limit, n_steps = 1, suicide_penalty = -100):
+    def __init__(self, env, worst_reward_limit, n_steps = 1, suicide_penalty = -1000):
         super(EndOfBadEpisodes, self).__init__(env)
         self._worst_reward_limit = worst_reward_limit
         self._n_steps = n_steps
@@ -171,5 +193,16 @@ class TimedActions(gym.ActionWrapper):
         #re-initialize next action time so that the first action will be issued immeadiately
         self.next_action_time = time.time()
         return self.env.reset(**kwargs)
+
+class FakeActions(gym.ActionWrapper):
+    """
+    An ActionWrapper for gym environments that calls the fakeStep() method of the wrapped env instead of the step() method.
+    """
+    def __init__(self, env, actions_per_second = 10):
+        super(FakeActions, self).__init__(env)
+
+    def step(self, action):
+        return self.env.fakeStep(action)    #finally issue the fakeAction action and return
+    
 
 

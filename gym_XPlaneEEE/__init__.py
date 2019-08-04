@@ -8,7 +8,7 @@ register(
     entry_point='gym_XPlaneEEE.envs:XplaneEEESpeedEnv',
     max_episode_steps=3000,    #this equals 300secs=5mins of flight at a rate of 10/sec
     reward_threshold=1.0,   #TODO tbc. don't know yet
-    nondeterministic = True,#TODO what does this mean
+    nondeterministic = False,#TODO what does this mean
 )
 
 register(
@@ -16,5 +16,5 @@ register(
     entry_point='gym_XPlaneEEE.envs:XplaneEEEGlideAngleEnv',
     max_episode_steps=3000,    #this equals 300secs=5mins of flight at a rate of 10/sec
     reward_threshold=1.0,   #TODO tbc. don't know yet
-    nondeterministic = True,#TODO what does this mean
+    nondeterministic = False,#TODO what does this mean
 )

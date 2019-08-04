@@ -7,7 +7,7 @@ import argparse
 import numpy as np
 
 DEFAULT_ENV_NAME = "XPlaneEEEGlideAngle-v0"
-STEPS_PER_SECOND = 5    #TODO set this to 10 again
+STEPS_PER_SECOND = 10
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -20,9 +20,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     env = gym.make(args.env)
-    env = wrappers.TimeLimit(env, max_episode_seconds=15)
-    env = wrappers.EndOfBadEpisodes(env, -30, 50, suicide_penalty = -100)
+    # env = wrappers.FakeActions(env)
+    env = wrappers.TimeLimit(env, max_episode_steps=250)
+    # env = wrappers.EndOfBadEpisodes(env, -80, 50, suicide_penalty = -3000)
     env = wrappers.TimedActions(env, STEPS_PER_SECOND)
+    # env = wrappers.ObservationScaler(env)
+    # env = wrappers.BufferWrapper(env, 10)
 
     total_reward = 0.0
     total_steps = 0

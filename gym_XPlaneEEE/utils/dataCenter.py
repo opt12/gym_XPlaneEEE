@@ -65,24 +65,35 @@ class DataCenter(SingletonMixin):
         Returns a single (raw) observation to be used for the speed control. The following datarefs are included:
         - glide Angle           #the descent angle to be controlled glide Angle = to_degrees(atan(Vh_ind/tas)
         - stallWarning          #The stall warning signal
-        - tas                   #the true airspeed [m/s]
-        - Vh_ind                #the sinkrate [m/s]
-        - h_ind                 #Indicated barometric altitude, quite probably in feet actually.
-        - alpha                 #angle of attack
-        - true_theta            #pitch
-        - yoke_pitch_ratio      #The deflection of the joystick axis controlling pitch.
-        - true_phi              #roll
-        - yoke_roll_ratio       #The deflection of the joystick axis controlling roll.
+        #- tas                   #the true airspeed [m/s]
+        #- Vh_ind                #the sinkrate [m/s]
+        #- h_ind                 #Indicated barometric altitude, quite probably in feet actually.
+        #- alpha                 #angle of attack
+        #- true_theta            #pitch
+        #- yoke_pitch_ratio      #The deflection of the joystick axis controlling pitch.
+        #- true_phi              #roll
+        #- yoke_roll_ratio       #The deflection of the joystick axis controlling roll.
 
         Normalization of the values needs to be done in a wrapper.
         """
-        keyList = [None, 'stallWarning', 'true_airspeed', 'vh_ind', 'h_ind', 
-                   'alpha', 'true_theta', 'yoke_pitch_ratio', 'true_phi', 'yoke_roll_ratio']
+        # keyList = [None, 'stallWarning', 'true_airspeed', 'vh_ind', 'h_ind', 
+        #            'alpha', 'true_theta', 'yoke_pitch_ratio', 'true_phi', 'yoke_roll_ratio']
+        keyList = [None, None, 'Qrad']
         obs = self.getObservation(keyList)
-        if obs[2] != 0:
+        tas, Vh_ind = self.getObservation(['true_airspeed','vh_ind'])
+        # if obs[2] != 0:
+        #     #wir müssen den Gleitwinkel selber rechnen aus true_airspeed und sinkrate
+        #     #der von XPlane ausgegebene Winkel ist bezogen auf ground_speed und damit bei Wind unbrauchbar.
+        #     obs[0] = np.rad2deg(np.arctan(obs[3]/obs[2]))
+        glideAngleRad = 0.0
+        if tas != 0:
             #wir müssen den Gleitwinkel selber rechnen aus true_airspeed und sinkrate
             #der von XPlane ausgegebene Winkel ist bezogen auf ground_speed und damit bei Wind unbrauchbar.
-            obs[0] = np.rad2deg(np.arctan(obs[3]/obs[2]))
+            glideAngleRad = np.arctan(Vh_ind/tas)  #in radians
+        targetGlideAngle = np.deg2rad(self.getObservation([['targetValues','requestedClimbRate']])[0])
+        angleDeviation = glideAngleRad - targetGlideAngle
+        obs[0] = np.sin(angleDeviation)
+        obs[1] = np.cos(angleDeviation)
         return obs
 
     def getObservation(self, keyList):

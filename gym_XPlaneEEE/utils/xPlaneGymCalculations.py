@@ -9,9 +9,9 @@ VPATH_AVG = -6.0    # a little bit steeper than optimal glide
 VPATH_STD_DEV = 0.1 * abs(VPATH_AVG)
 # Speed to be chosen a little bit higher than optimal glide of 68 KIAS; #TODO change during experiments
 FWD_SPEED_AVG = 75 * 0.51444444444  # 1 Knot = 0.51444444444 m/s
-FWD_SPEED_STD_DEV = 0.1 * FWD_SPEED_AVG
+FWD_SPEED_STD_DEV = 0.05 * FWD_SPEED_AVG
 ALTITUDE_AVG = 1500.0
-ALTITUDE_STD_DEV = 1000.0
+ALTITUDE_STD_DEV = 250.0
 PHI_AVG = 0  # roll
 PHI_STD_DEV = 10  # width of the roll distribution
 

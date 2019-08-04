@@ -32,7 +32,7 @@ class XplaneEEEGlideAngleEnv(gym.Env):
         self.dc = DataCenter.instance()
         self.ipcClient = None
         self.curr_episode = 0
-        self.reward = -10
+        self.reward = 0
         self.targetGlideAngle = DESIRED_GLIDE_ANGLE
         # Define action and observation space
         #- yoke_pitch_ratio
@@ -41,15 +41,26 @@ class XplaneEEEGlideAngleEnv(gym.Env):
         #- glide Angle           #the descent angle to be controlled glide Angle = to_degrees(atan(Vh_ind/tas)
         #- stallWarning          #The stall warning signal
         #- tas                   #the true airspeed [m/s]
-        #- Vh_ind                #the sinkrate [m/s]
-        #- h_ind                 #Indicated barometric altitude, quite probably in feet actually.
-        #- alpha                 #angle of attack
-        #- true_theta            #pitch
-        #- yoke_pitch_ratio      #The deflection of the joystick axis controlling pitch.
-        #- true_phi              #roll
-        #- yoke_roll_ratio       #The deflection of the joystick axis controlling roll.
-        self.observation_space = spaces.Box(low=np.array([-25.0, 0.0,   0.0, -60.0,     0.0, -10.0, -30.0, -1.0, -90.0, -1.0]), 
-                                           high=np.array([ 25.0, 1.0, 120.0, +60.0, 15000.0, +10.0, +30.0, +1.0, +90.0, +1.0]), dtype=np.float32)
+        ##- Vh_ind                #the sinkrate [m/s]
+        ##- h_ind                 #Indicated barometric altitude, quite probably in feet actually.
+        ##- alpha                 #angle of attack
+        ##- true_theta            #pitch
+        ##- yoke_pitch_ratio      #The deflection of the joystick axis controlling pitch.
+        ##- true_phi              #roll
+        ##- yoke_roll_ratio       #The deflection of the joystick axis controlling roll.
+        # self.observation_space = spaces.Box(low=np.array([-90.0, 0.0,   0.0, -100.0,     0.0, -25.0, -90.0, -1.0, -90.0, -1.0]), 
+        #                                    high=np.array([ 90.0, 1.0, 200.0, +100.0, 15000.0, +25.0, +90.0, +1.0, +90.0, +1.0]), dtype=np.float32)
+        # Observations are:
+        # obs[0]: sin(angleDeviation)
+        # obs[1]: cos(angleDeviation)
+        # obs[2]: Qrad (i. e. ThetaDot /rad)
+        # obs[3]: angleDeviation /rad
+        # obs[4]: yoke_pitch_ratio (of last action)
+        # # obs[5]: stall Warning
+        # # obs[6]: true Airspeed [m/s range 0...120]
+
+        self.observation_space = spaces.Box(low=np.array([-1.0, -1.0, -20.0, -3.14, -1.0]), 
+                                           high=np.array([ 1.0,  1.0,  20.0,  3.14,  1.0]), dtype=np.float32)
         try: 
             self._establish_connection()
         except Exception as inst:
@@ -98,8 +109,79 @@ class XplaneEEEGlideAngleEnv(gym.Env):
                  use this for learning.
         """
         self._take_action(action)
-        self.glideAngleObservation = self.dc.getGlideAngleObservation() #TODO the observation list should go here
-        self.reward = self._get_reward()
+
+        obs = self._get_Observations()
+        self.glideAngleObservation = obs
+        self.reward = self._get_reward(obs[3], obs[2], obs[4])
+
+        episode_over = self._check_end_episode()    #TODO
+        return self.glideAngleObservation, self.reward, episode_over, {}
+
+    def _get_Observations(self):
+        """
+        Observations are:
+        obs[0]: sin(angleDeviation)
+        obs[1]: cos(angleDeviation)
+        obs[2]: Qrad (i. e. ThetaDot /rad)
+        obs[3]: angleDeviation /rad
+        obs[4]: yoke_pitch_ratio (of last action)
+        # obs[5]: stall Warning
+        # obs[6]: true Airspeed [m/s range 0...120]
+        """
+
+        keyList = [None, None, 'Qrad', None, 'yoke_pitch_ratio']
+        obs = self.dc.getObservation(keyList)
+        tas, Vh_ind = self.dc.getObservation(['true_airspeed','vh_ind'])
+        glideAngleRad = 0.0
+        if tas != 0:
+            #wir müssen den Gleitwinkel selber rechnen aus true_airspeed und sinkrate
+            #der von XPlane ausgegebene Winkel ist bezogen auf ground_speed und damit bei Wind unbrauchbar.
+            glideAngleRad = np.arctan(Vh_ind/tas)  #in radians
+        # glideAngleRad = np.deg2rad(self.dc.getObservation(['true_theta']))
+        targetGlideAngle = np.deg2rad(self.dc.getObservation([['targetValues','requestedClimbRate']])[0])
+        angleDeviation = glideAngleRad - targetGlideAngle
+        obs[0] = np.sin(angleDeviation)
+        obs[1] = np.cos(angleDeviation)
+        obs[3] = angleDeviation
+        return obs
+
+    def fakeStep(self, action):
+        """
+        The fakeStep method is to get the actions and rewards into the GYM environment from the PID controller of DubinsPilot.
+        The action parameter will be silently swallowed and only the current observation and reward is returned.
+        
+        Parameters
+        ----------
+        action (float): Will be ignored.
+
+        Returns
+        -------
+        ob, reward, episode_over, info : tuple
+            ob (object) :
+                an environment-specific object representing your observation of
+                the environment.
+            reward (float) :
+                amount of reward achieved by the previous action. The scale
+                varies between environments, but the goal is always to increase
+                your total reward.
+            episode_over (bool) :
+                whether it's time to reset the environment again. Most (but not
+                all) tasks are divided up into well-defined episodes, and done
+                being True indicates the episode has terminated. (For example,
+                perhaps the pole tipped too far, or you lost your last life.)
+            info (dict) :
+                 diagnostic information useful for debugging. It can sometimes
+                 be useful for learning (for example, it might contain the raw
+                 probabilities behind the environment's last state change).
+                 However, official evaluations of your agent are not allowed to
+                 use this for learning.
+        """
+        # self._take_action(action)
+
+        obs = self._get_Observations()
+        self.glideAngleObservation = obs
+        self.reward = self._get_reward(obs[3], obs[2], obs[4])
+
         episode_over = self._check_end_episode()    #TODO
         return self.glideAngleObservation, self.reward, episode_over, {}
 
@@ -149,13 +231,14 @@ class XplaneEEEGlideAngleEnv(gym.Env):
         newPlaneState = prepareInitialPlaneState()
         # set initial plane state
         if self.ipcClient.socketSendData("SET_PLANE_STATE", 1, newPlaneState['data']):
+            self._take_action(0.0)  #reset the elevator to 0
             #get the first observation after changing the plane's state
             print("Waiting for first {} observations after RESET".format(waitingSteps))
             for i in range(waitingSteps):
                 if not self.dc.awaitNextObservation():  #block until a new observation is sent from XPlane
-                    raise ConnectionError("Didn't receive any new Observations within one second. Check Connection to XPlane!")
+                    # raise ConnectionError("Didn't receive any new Observations within one second. Check Connection to XPlane!")
                     return None #timeout ocurred
-            return self.dc.getGlideAngleObservation()
+            return self._get_Observations()
         else:
             return None
 
@@ -163,25 +246,26 @@ class XplaneEEEGlideAngleEnv(gym.Env):
         """ This function is currently useless as the rendering is 
             done externally. 
         """
-        print(f'current Angle: {self.glideAngleObservation[0]}; target Angle: {self.targetGlideAngle}; reward: {self.reward};')
+        self.glideAngleObservation = self._get_Observations()
+        print(f'current Deviation: {self.glideAngleObservation[3]}; current Qrad: {self.glideAngleObservation[2]}; reward: {self.reward};')
     
     def _seed(self):
         pass
 
-    def _calculate_glide_angle_deviation(self, angle):
-        """
-        calculates absolute value deviation of the current state from the desired glide angle
-        """
-        self.targetGlideAngle = self.dc.getObservation([['targetValues','requestedClimbRate']])
-        #angles are usually small, so no normalization
-        dev = abs(angle - self.targetGlideAngle)
-        return dev
+    # def _calculate_glide_angle_deviation(self, angle):
+    #     """
+    #     calculates absolute value deviation of the current state from the desired glide angle
+    #     """
+    #     self.targetGlideAngle = self.dc.getObservation([['targetValues','requestedClimbRate']])[0]
+    #     #angles are usually small, so no normalization
+    #     dev = (angle - self.targetGlideAngle)
+    #     return dev
     
     def _caclulate_actuation_smoothness(self):
         #TODO calculate the smoothness over the last n elevator actions and weigh them with a suitable factor
         return 0
 
-    def _get_reward(self):
+    def _get_reward(self, angleDeviation, qrad, actuation):
         """ 
         Reward is given for maintaining the desired glide angle within suitable flight conditions.
         The maximum reward to be earned is 0. Quadratic deviation from the desired angle is given
@@ -190,8 +274,5 @@ class XplaneEEEGlideAngleEnv(gym.Env):
           #TODO - when the stall warning is active.
           #TODO - for the smoothness of the actuation
         """
-        reward = -self._calculate_glide_angle_deviation(self.glideAngleObservation[0])  #TODO this calculation and the factor are still somewhat arbitrary
-        # if self.glideAngleObservation[1] != 0:
-        #     reward += PUNISHMENT_STALL
-        # reward += self._caclulate_actuation_smoothness()
-        return reward
+        cost = 10*angleDeviation**2 + 0.1*qrad**2 + 0.1*actuation**2
+        return -cost
